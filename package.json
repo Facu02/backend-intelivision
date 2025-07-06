@@ -1,0 +1,37 @@
+{
+  "name": "intelevision-backend",
+  "version": "1.0.0",
+  "description": "Backend para InteLeVision - Asistente de Visión con IA para personas con discapacidad visual",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "intelevision",
+    "ai",
+    "vision",
+    "accessibility",
+    "websocket",
+    "openai"
+  ],
+  "author": "InteLeVision Team",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.840.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.842.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "openai": "^4.20.1",
+    "socket.io": "^4.7.4",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
