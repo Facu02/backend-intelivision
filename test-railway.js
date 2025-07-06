@@ -1,7 +1,7 @@
 const io = require('socket.io-client');
 
-// IMPORTANTE: Cambia esta URL por la que te dé Railway
-const RAILWAY_URL = 'https://tu-app.railway.app'; // ⚠️ CAMBIAR DESPUÉS DEL DEPLOY
+// URL pública de Railway
+const RAILWAY_URL = 'https://backend-intelivision-production.up.railway.app';
 
 console.log('🚂 Probando conexión con Railway...');
 console.log('🔗 URL:', RAILWAY_URL);

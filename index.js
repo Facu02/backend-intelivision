@@ -231,7 +231,23 @@ function translateObjectType(tipo) {
     'bottle': 'botella',
     'book': 'libro',
     'phone': 'teléfono',
-    'laptop': 'portátil'
+    'laptop': 'portátil',
+    'computer': 'computadora',
+    'pc': 'PC',
+    'monitor': 'monitor',
+    'screen': 'pantalla',
+    'keyboard': 'teclado',
+    'mouse': 'ratón',
+    'tv': 'televisión',
+    'sofa': 'sofá',
+    'couch': 'sofá',
+    'bed': 'cama',
+    'door': 'puerta',
+    'window': 'ventana',
+    'wall': 'pared',
+    'plant': 'planta',
+    'bag': 'bolsa',
+    'backpack': 'mochila'
   };
   
   return translations[tipo] || tipo;
@@ -433,23 +449,49 @@ function isDataRelevant(dataSummary, clientId) {
     );
   });
   
-  // Verificar cambios en objetos (especialmente vehículos en movimiento)
+  // Verificar cambios en objetos (especialmente nuevos objetos y movimiento)
   const hasSignificantObjectChange = objetos.some(objeto => {
     const lastObjeto = lastData.objetos.find(o => o.tipo === objeto.tipo);
-    if (!lastObjeto) return true;
     
-    // Objetos en movimiento son más relevantes
-    if (objeto.movimiento === 'se_acerca' || objeto.movimiento === 'cruzando') {
+    // OBJETO NUEVO: Siempre es relevante
+    if (!lastObjeto) {
+      log(`Objeto nuevo detectado: ${objeto.tipo} - ${objeto.direccion}`, 'debug');
       return true;
     }
     
-    return (
+    // Objetos en movimiento son más relevantes
+    if (objeto.movimiento === 'se_acerca' || objeto.movimiento === 'cruzando') {
+      log(`Objeto en movimiento crítico: ${objeto.tipo} - ${objeto.movimiento}`, 'debug');
+      return true;
+    }
+    
+    // Verificar cambios en propiedades del objeto
+    const hasChanges = (
       objeto.movimiento !== lastObjeto.movimiento ||
       objeto.direccion !== lastObjeto.direccion
     );
+    
+    if (hasChanges) {
+      log(`Cambios en objeto ${objeto.tipo}: movimiento(${lastObjeto.movimiento}→${objeto.movimiento}) direccion(${lastObjeto.direccion}→${objeto.direccion})`, 'debug');
+    }
+    
+    return hasChanges;
   });
   
-  return hasSignificantPersonChange || hasSignificantObjectChange;
+  // Verificar si hay objetos nuevos que no existían antes
+  const hasNewObjects = objetos.length > lastData.objetos.length;
+  
+  if (hasNewObjects) {
+    log(`Detectados ${objetos.length - lastData.objetos.length} objetos nuevos`, 'debug');
+  }
+  
+  const isRelevant = hasSignificantPersonChange || hasSignificantObjectChange || hasNewObjects;
+  
+  if (!isRelevant) {
+    log(`No hay cambios relevantes - Personas: ${personas.length}→${lastData.personas.length}, Objetos: ${objetos.length}→${lastData.objetos.length}`, 'debug');
+  }
+  
+  return isRelevant;
 }
 
 // Función para procesar datos agregados
@@ -458,6 +500,15 @@ async function processAggregatedData(clientId, sensorData) {
     log(`Procesando ${sensorData.length} muestras para cliente ${clientId}`, 'info');
     
     const dataSummary = createDataSummary(sensorData);
+    
+    // Log detallado de lo que se está procesando
+    log(`Resumen de datos para ${clientId} - Personas: ${dataSummary.personas.length}, Objetos: ${dataSummary.objetos.length}`, 'debug');
+    if (dataSummary.objetos.length > 0) {
+      log(`Objetos detectados: ${dataSummary.objetos.map(o => `${o.tipo}(${o.direccion})`).join(', ')}`, 'debug');
+    }
+    if (dataSummary.personas.length > 0) {
+      log(`Personas detectadas: ${dataSummary.personas.map(p => `${p.expresion}(${p.posicion})`).join(', ')}`, 'debug');
+    }
     
     // Filtrado previo: verificar si los datos son relevantes
     if (!isDataRelevant(dataSummary, clientId)) {
@@ -475,14 +526,15 @@ async function processAggregatedData(clientId, sensorData) {
       log(`Respuesta de Bedrock Agent: "${description}"`, 'debug');
       
       // Verificar si el LLM considera la información no relevante
+      // Solo filtrar si la respuesta es completamente vacía o contiene indicadores específicos
       if (description === '' || 
           description === '""' || 
+          description === '""""' ||
+          description.trim() === '' ||
           description.toLowerCase().includes('[información no relevante]') || 
           description.toLowerCase().includes('[no relevante]') ||
-          description.toLowerCase().includes('no relevante') ||
-          description.toLowerCase().includes('camino libre') ||
-          description.toLowerCase().includes('todo tranquilo') ||
-          description.toLowerCase().includes('área libre')) {
+          description.toLowerCase().includes('sin cambios') ||
+          description.toLowerCase().includes('situación repetitiva')) {
         log(`LLM marcó información como no relevante para cliente ${clientId}: "${description}"`, 'debug');
         return null; // No enviar al cliente
       }
@@ -499,10 +551,11 @@ async function processAggregatedData(clientId, sensorData) {
       // Verificar también si la respuesta fallback es no relevante
       if (description === '' || 
           description === '""' || 
+          description === '""""' ||
+          description.trim() === '' ||
           description.toLowerCase().includes('[información no relevante]') || 
-          description.toLowerCase().includes('camino libre') ||
-          description.toLowerCase().includes('todo tranquilo') ||
-          description.toLowerCase().includes('área libre')) {
+          description.toLowerCase().includes('sin cambios') ||
+          description.toLowerCase().includes('situación repetitiva')) {
         log(`Fallback marcó información como no relevante para cliente ${clientId}: "${description}"`, 'debug');
         return null; // No enviar al cliente
       }
