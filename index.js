@@ -30,6 +30,9 @@ app.use(express.json());
 // Almacenamiento de datos agregados por cliente
 const clientData = new Map();
 
+// Almacenamiento de última información enviada por cliente (para filtrado)
+const lastSentData = new Map();
+
 // Función de logging mejorada
 function log(message, level = 'info') {
   const timestamp = new Date().toISOString();
@@ -40,6 +43,8 @@ function log(message, level = 'info') {
 // Función para limpiar datos antiguos
 function cleanupOldData() {
   const now = Date.now();
+  
+  // Limpiar datos de sensores
   for (const [clientId, data] of clientData.entries()) {
     data.sensorData = data.sensorData.filter(item => 
       now - item.timestamp < AGGREGATION_WINDOW_MS
@@ -47,6 +52,14 @@ function cleanupOldData() {
     
     if (data.sensorData.length === 0) {
       clientData.delete(clientId);
+    }
+  }
+  
+  // Limpiar datos de último envío (más de 1 minuto)
+  const ONE_MINUTE = 60000;
+  for (const [clientId, data] of lastSentData.entries()) {
+    if (now - data.timestamp > ONE_MINUTE) {
+      lastSentData.delete(clientId);
     }
   }
 }
@@ -273,7 +286,7 @@ function generateFallbackResponse(dataSummary) {
     return `${objeto.tipo} ${objeto.direccion}`;
   }
 
-  return "Camino libre tranquilo";
+  return "";
 }
 
 // Funciones auxiliares para el fallback emocional
@@ -385,20 +398,95 @@ function getMicroExpressionFromBlendshapes(blendshapes) {
   return descriptions[strongest.name] || null;
 }
 
+// Función para verificar si los datos son relevantes (filtrado previo)
+function isDataRelevant(dataSummary, clientId) {
+  const { personas, objetos, totalDatos } = dataSummary;
+  
+  // Si no hay datos o muy pocos datos, no es relevante
+  if (totalDatos === 0 || (personas.length === 0 && objetos.length === 0)) {
+    log(`Filtrado previo: Sin datos relevantes (personas: ${personas.length}, objetos: ${objetos.length})`, 'debug');
+    return false;
+  }
+  
+  // Obtener últimos datos enviados para este cliente
+  const lastData = lastSentData.get(clientId);
+  
+  // Si es la primera vez, es relevante
+  if (!lastData) {
+    return true;
+  }
+  
+  // Verificar cambios significativos en personas
+  if (personas.length !== lastData.personas.length) {
+    return true;
+  }
+  
+  // Verificar cambios en expresiones o gestos importantes
+  const hasSignificantPersonChange = personas.some(persona => {
+    const lastPersona = lastData.personas.find(p => p.posicion === persona.posicion);
+    if (!lastPersona) return true;
+    
+    return (
+      persona.expresion !== lastPersona.expresion ||
+      persona.gesto !== lastPersona.gesto ||
+      persona.distancia !== lastPersona.distancia
+    );
+  });
+  
+  // Verificar cambios en objetos (especialmente vehículos en movimiento)
+  const hasSignificantObjectChange = objetos.some(objeto => {
+    const lastObjeto = lastData.objetos.find(o => o.tipo === objeto.tipo);
+    if (!lastObjeto) return true;
+    
+    // Objetos en movimiento son más relevantes
+    if (objeto.movimiento === 'se_acerca' || objeto.movimiento === 'cruzando') {
+      return true;
+    }
+    
+    return (
+      objeto.movimiento !== lastObjeto.movimiento ||
+      objeto.direccion !== lastObjeto.direccion
+    );
+  });
+  
+  return hasSignificantPersonChange || hasSignificantObjectChange;
+}
+
 // Función para procesar datos agregados
 async function processAggregatedData(clientId, sensorData) {
   try {
     log(`Procesando ${sensorData.length} muestras para cliente ${clientId}`, 'info');
     
     const dataSummary = createDataSummary(sensorData);
+    
+    // Filtrado previo: verificar si los datos son relevantes
+    if (!isDataRelevant(dataSummary, clientId)) {
+      log(`Datos no relevantes para cliente ${clientId}, omitiendo procesamiento`, 'debug');
+      return null; // No procesar ni enviar
+    }
+    
     let description;
     let fallback = false;
 
-    // Usar Bedrock Agent
+    // Usar Bedrock Agent con filtrado inteligente
     try {
       log('Enviando solicitud a Bedrock Agent...', 'debug');
       description = await bedrockAgent.analyzeSensorData(dataSummary);
       log(`Respuesta de Bedrock Agent: "${description}"`, 'debug');
+      
+      // Verificar si el LLM considera la información no relevante
+      if (description === '' || 
+          description === '""' || 
+          description.toLowerCase().includes('[información no relevante]') || 
+          description.toLowerCase().includes('[no relevante]') ||
+          description.toLowerCase().includes('no relevante') ||
+          description.toLowerCase().includes('camino libre') ||
+          description.toLowerCase().includes('todo tranquilo') ||
+          description.toLowerCase().includes('área libre')) {
+        log(`LLM marcó información como no relevante para cliente ${clientId}: "${description}"`, 'debug');
+        return null; // No enviar al cliente
+      }
+      
     } catch (error) {
       log('Usando respuesta fallback debido a error de Bedrock Agent', 'warn');
       log(`Error Bedrock Agent: ${error && error.message ? error.message : error}`, 'error');
@@ -407,7 +495,25 @@ async function processAggregatedData(clientId, sensorData) {
       }
       description = generateFallbackResponse(dataSummary);
       fallback = true;
+      
+      // Verificar también si la respuesta fallback es no relevante
+      if (description === '' || 
+          description === '""' || 
+          description.toLowerCase().includes('[información no relevante]') || 
+          description.toLowerCase().includes('camino libre') ||
+          description.toLowerCase().includes('todo tranquilo') ||
+          description.toLowerCase().includes('área libre')) {
+        log(`Fallback marcó información como no relevante para cliente ${clientId}: "${description}"`, 'debug');
+        return null; // No enviar al cliente
+      }
     }
+
+    // Almacenar datos enviados para filtrado futuro
+    lastSentData.set(clientId, {
+      personas: dataSummary.personas,
+      objetos: dataSummary.objetos,
+      timestamp: Date.now()
+    });
 
     const response = {
       description: description,
@@ -481,9 +587,13 @@ io.on('connection', (socket) => {
         // Procesar datos
         const response = await processAggregatedData(clientId, aggregatedData);
         
-        // Enviar respuesta al cliente
-        socket.emit('ai-description', response);
-        log(`Respuesta enviada a ${clientId}: "${response.description}"`, 'info');
+        // Solo enviar respuesta si es relevante (no null)
+        if (response) {
+          socket.emit('ai-description', response);
+          log(`Respuesta enviada a ${clientId}: "${response.description}"`, 'info');
+        } else {
+          log(`Respuesta omitida para ${clientId}: información no relevante`, 'debug');
+        }
         
         // Limpiar datos procesados
         client.sensorData = [];
@@ -499,6 +609,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     log(`Cliente desconectado: ${clientId}`, 'info');
     clientData.delete(clientId);
+    lastSentData.delete(clientId);
   });
 
   // Manejar errores de socket

@@ -77,10 +77,31 @@ class BedrockAgentManager {
     }
 
     if (personas.length === 0 && objetos.length === 0) {
-      prompt = "No se detectaron personas ni objetos. Responde: 'Camino libre, todo tranquilo'";
+      prompt = "No se detectaron personas ni objetos. Responde solamente: \"\"";
     }
 
-    prompt += `\nProporciona una descripción útil en máximo 5 palabras para una persona con discapacidad visual.`;
+    prompt += `\n\nINSTRUCCIONES ESPECÍFICAS:
+- Si la situación es rutinaria, repetitiva o no requiere atención especial, responde EXACTAMENTE con un mensaje vacío: ""
+- Si hay cambios importantes, personas interactuando, vehículos en movimiento, o situaciones que requieren atención, proporciona una descripción útil en máximo 5 palabras
+- Prioriza SOLO información crítica o novedosa para una persona con discapacidad visual
+
+CUÁNDO ENVIAR MENSAJE VACÍO (""):
+- Persona parada igual que antes
+- Mismo objeto en misma posición  
+- Situación sin cambios significativos
+- Movimientos repetitivos sin relevancia
+- Objetos estáticos conocidos
+
+CUÁNDO SÍ DESCRIBIR (máximo 5 palabras):
+- Persona acercándose o alejándose
+- Vehículo cruzando o en movimiento
+- Nueva persona detectada
+- Expresión cambió (feliz a triste, etc.)
+- Gesto nuevo o significativo
+- Objeto en movimiento peligroso
+- Cambio de distancia importante
+
+FORMATO: Si es relevante, usa máximo 5 palabras descriptivas. Si no es relevante, responde solamente: ""`;
 
     return await this.invokeAgent(prompt);
   }
